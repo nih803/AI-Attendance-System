@@ -1,0 +1,21 @@
+# Python
+__pycache__/
+*.py[cod]
+
+# Virtual environments
+.venv/
+venv/
+
+# Private student data
+data/enrollment/*
+data/test_cases/*
+!data/enrollment/.gitkeep
+!data/test_cases/.gitkeep
+
+# Local databases
+*.db
+*.sqlite
+*.sqlite3
+
+# Secrets and local configuration
+.env
