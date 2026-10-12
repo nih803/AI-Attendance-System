@@ -19,3 +19,5 @@ data/test_cases/*
 
 # Secrets and local configuration
 .env
+# Downloaded AI model files
+models/*.onnx
