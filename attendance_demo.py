@@ -1,0 +1,21 @@
+
+from src.attendance.database import (
+    create_tables,
+    add_student,
+    list_students,
+    mark_attendance,
+    list_attendance,
+)
+
+create_tables()
+
+add_student("DEMO001", "Demo Student")
+add_student("DEMO002", "Test Student")
+
+list_students()
+
+print("\n--- Testing Attendance ---")
+mark_attendance("DEMO001", "Morning")
+mark_attendance("DEMO001", "Morning")
+
+list_attendance()
