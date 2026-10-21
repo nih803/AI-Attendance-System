@@ -2,6 +2,7 @@
 import cv2
 from pathlib import Path
 import numpy as np
+from src.attendance.database import mark_attendance
 
 # Load the pretrained models
 detector = cv2.FaceDetectorYN_create(
@@ -60,6 +61,7 @@ camera = cv2.VideoCapture(0)
 if not camera.isOpened():
     raise SystemExit("Could not open webcam.")
 
+attendance_marked = False
 while True:
     success, frame = camera.read()
 
@@ -86,9 +88,15 @@ while True:
             x, y, w, h = face[:4].astype(int)
 
             # Initial demo threshold; must be calibrated
+            
             if similarity >= 0.40:
                 label = f"{student_id} | Similarity: {similarity:.2f}"
                 color = (0, 255, 0)
+
+            if not attendance_marked:
+                mark_attendance(student_id, "Morning")
+                attendance_marked = True
+                print(f"Attendance attempt completed for {student_id}.")
             else:
                 label = f"Unknown | Similarity: {similarity:.2f}"
                 color = (0, 0, 255)

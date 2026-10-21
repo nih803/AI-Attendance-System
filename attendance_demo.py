@@ -11,6 +11,7 @@ create_tables()
 
 add_student("DEMO001", "Demo Student")
 add_student("DEMO002", "Test Student")
+add_student("ST001", "Test Student")
 
 list_students()
 
