@@ -43,9 +43,15 @@ def create_tables():
 
 
 
+
 def add_student(student_id, name):
-    """Register a student in the database."""
-    import sqlite3
+    """Register a student and return the result."""
+
+    student_id = student_id.strip()
+    name = name.strip()
+
+    if not student_id or not name:
+        return "invalid"
 
     try:
         with get_connection() as connection:
@@ -53,10 +59,13 @@ def add_student(student_id, name):
                 "INSERT INTO students (student_id, name) VALUES (?, ?)",
                 (student_id, name)
             )
+
         print(f"Student {name} registered successfully!")
+        return "success"
 
     except sqlite3.IntegrityError:
         print(f"Student ID {student_id} already exists.")
+        return "duplicate"
 
 
 def list_students():
@@ -78,8 +87,10 @@ def list_students():
 from datetime import date
 
 
+
 def mark_attendance(student_id, session):
-    """Record attendance for a student for today's session."""
+    """Record attendance and return the result."""
+
     attendance_date = date.today().isoformat()
 
     try:
@@ -94,13 +105,12 @@ def mark_attendance(student_id, session):
             )
 
         print(f"Attendance marked for {student_id}.")
+        return "success"
 
     except sqlite3.IntegrityError:
-        print(
-            f"Attendance not recorded for {student_id}. "
-            "Check whether the student exists or attendance "
-            "has already been marked for this session."
-        )
+        print(f"Attendance already recorded or student does not exist.")
+        return "duplicate_or_invalid"
+
 
 
 def list_attendance():
