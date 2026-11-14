@@ -1,5 +1,6 @@
 import streamlit as st
 import sqlite3
+import logging
 from pathlib import Path
 from datetime import date, datetime
 import cv2
@@ -14,6 +15,8 @@ from src.attendance.recognition import (
 
 from src.attendance.database import add_student
 from src.attendance.enrollment import save_face_image
+
+logger = logging.getLogger(__name__)
 
 # ==========================================
 # PAGE CONFIGURATION
@@ -56,56 +59,69 @@ def get_dashboard_data():
             "present_today": 0,
             "absent_today": 0,
             "attendance_rate": 0,
-            "recent_records": []
+            "recent_records": [],
+            "database_error": False,
         }
 
-    with sqlite3.connect(DB_PATH) as connection:
-        total_students = connection.execute(
-            "SELECT COUNT(*) FROM students"
-        ).fetchone()[0]
+    try:
+        with sqlite3.connect(DB_PATH, timeout=10) as connection:
+            total_students = connection.execute(
+                "SELECT COUNT(*) FROM students"
+            ).fetchone()[0]
 
-        today = date.today().isoformat()
+            today = date.today().isoformat()
 
-        present_today = connection.execute(
-            """
-            SELECT COUNT(DISTINCT student_id)
-            FROM attendance
-            WHERE attendance_date = ?
-            """,
-            (today,)
-        ).fetchone()[0]
+            present_today = connection.execute(
+                """
+                SELECT COUNT(DISTINCT student_id)
+                FROM attendance
+                WHERE attendance_date = ?
+                """,
+                (today,)
+            ).fetchone()[0]
 
-        absent_today = max(total_students - present_today, 0)
+            absent_today = max(total_students - present_today, 0)
 
-        attendance_rate = (
-            round((present_today / total_students) * 100, 1)
-            if total_students > 0
-            else 0
-        )
+            attendance_rate = (
+                round((present_today / total_students) * 100, 1)
+                if total_students > 0
+                else 0
+            )
 
-        recent_records = connection.execute(
-            """
-            SELECT
-                s.student_id,
-                s.name,
-                a.attendance_date,
-                a.session,
-                a.recorded_at
-            FROM attendance AS a
-            JOIN students AS s
-                ON a.student_id = s.student_id
-            ORDER BY a.attendance_date DESC,
-                     a.recorded_at DESC
-            LIMIT 10
-            """
-        ).fetchall()
+            recent_records = connection.execute(
+                """
+                SELECT
+                    s.student_id,
+                    s.name,
+                    a.attendance_date,
+                    a.session,
+                    a.recorded_at
+                FROM attendance AS a
+                JOIN students AS s
+                    ON a.student_id = s.student_id
+                ORDER BY a.attendance_date DESC,
+                         a.recorded_at DESC
+                LIMIT 10
+                """
+            ).fetchall()
+    except sqlite3.Error:
+        logger.exception("Could not read the dashboard database")
+        return {
+            "total_students": 0,
+            "present_today": 0,
+            "absent_today": 0,
+            "attendance_rate": 0,
+            "recent_records": [],
+            "database_error": True,
+        }
 
     return {
         "total_students": total_students,
         "present_today": present_today,
         "absent_today": absent_today,
         "attendance_rate": attendance_rate,
-        "recent_records": recent_records
+        "recent_records": recent_records,
+        "database_error": False,
     }
 
 
@@ -330,6 +346,9 @@ if "last_saved_face_hash" not in st.session_state:
 # LOAD DATA
 # ==========================================
 data = get_dashboard_data()
+
+if data["database_error"]:
+    st.error("The attendance database could not be read. Review the local app logs.")
 
 total_students = data["total_students"]
 present_today = data["present_today"]
@@ -561,6 +580,10 @@ elif page == "Students":
             f"Selected student: **{selected_student_id}** · "
             f"Saved face images: **{existing_face_count}**"
         )
+        st.caption(
+            "Enroll only with the student's informed consent. Face photos are "
+            "stored locally in this project folder."
+        )
         st.write(
             "Capture one clear face photo at a time. Change your head "
             "angle slightly between photos. Only one person should be visible."
@@ -605,8 +628,9 @@ elif page == "Students":
                     else:
                         st.warning(message)
 
-                except Exception as error:
-                    st.error(f"Face enrollment failed: {error}")
+                except Exception:
+                    logger.exception("Face enrollment failed")
+                    st.error("Face enrollment failed. Check the local app logs and try again.")
 
         st.caption(
             "Tip: Capture several photos with small changes in head angle "
@@ -649,6 +673,10 @@ elif page == "Take Attendance":
     st.info(
         "Position one enrolled student's face clearly in the camera. "
         "After taking the photo, click Recognize & Mark Attendance."
+    )
+    st.caption(
+        "This prototype has no liveness detection. Review results and keep a "
+        "manual attendance option available."
     )
 
     try:
@@ -703,7 +731,7 @@ elif page == "Take Attendance":
 
                         if status == "attendance_processed":
                             st.success(message)
-                        elif status in ("already_processed", "duplicate_or_invalid"):
+                        elif status == "already_processed":
                             st.warning(message)
                         elif status == "no_face":
                             st.warning("No face detected. Please capture another photo with your face clearly visible.")
@@ -722,8 +750,12 @@ elif page == "Take Attendance":
                         if similarity is not None:
                             st.caption(f"Recognition similarity: {similarity:.2f}")
 
-    except Exception as error:
-        st.error(f"Could not start the recognition system: {error}")
+    except Exception:
+        logger.exception("Could not start the recognition system")
+        st.error(
+            "Could not start face recognition. Confirm both model files are "
+            "installed and review the local app logs."
+        )
 
 
 # ==========================================
@@ -1101,7 +1133,7 @@ elif page == "Settings":
     st.write("**Recognition:** OpenCV with pretrained models")
 
     st.warning(
-        "This is a local development prototype. "
-        "Authentication, role permissions, and robust liveness "
-        "detection have not yet been implemented."
+        "Local prototype only. Authentication, role permissions, robust "
+        "liveness detection, and a retention workflow are not implemented. "
+        "Recognition thresholds are experimental; review results manually."
     )

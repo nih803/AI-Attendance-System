@@ -1,57 +1,47 @@
-# AI-Powered Smart Attendance & Student Verification System
+# AttendAI architecture
 
-## 1. Project Objective
+## Runtime flow
 
-Build a prototype that identifies registered students using face recognition and records attendance automatically. QR verification will provide a controlled fallback, while liveness checks will help detect attempts to fool the camera with photographs or screen replays.
+1. `app.py` starts the Streamlit dashboard and opens the local SQLite database.
+2. Student registration is validated in `src/attendance/database.py`.
+3. Enrollment in `src/attendance/enrollment.py` checks the student ID, upload size and image dimensions, requires exactly one face, aligns it, then writes a JPEG beneath `data/enrollment/`.
+4. `src/attendance/recognition.py` loads the YuNet detector and SFace recognizer from `models/`, builds normalized references from local enrollment JPEGs and compares a captured face against those references.
+5. A match over the configured threshold with enough separation from the next candidate may be recorded. SQLite enforces uniqueness for `(student_id, attendance_date, session)`.
+6. The dashboard reads history and aggregates records for display and CSV export.
 
-## 2. System Workflow
+```text
+Browser
+  └── Streamlit app.py
+      ├── enrollment.py ── OpenCV ── data/enrollment/<student-id>/*.jpg
+      ├── recognition.py ─ OpenCV YuNet + SFace ─ models/*.onnx
+      └── database.py ─── SQLite ── attendance.db
+```
 
-1. A student stands in front of the webcam.
-2. The system detects a face.
-3. Face recognition compares it with enrolled students.
-4. Liveness checks help assess whether the camera is seeing a live person.
-5. If identity is uncertain, the system requests fallback verification or teacher approval.
-6. After successful verification, attendance is recorded.
-7. Duplicate attendance for the same session is prevented.
-8. The dashboard displays attendance records and reports.
+## Data boundaries
 
-## 3. Main Components
+| Data | Local location | Git policy |
+| --- | --- | --- |
+| Student face photos | `data/enrollment/` | Ignored |
+| Local test images | `data/test_cases/` | Ignored |
+| Student and attendance records | `attendance.db` | Ignored |
+| Downloaded model weights | `models/*.onnx` | Ignored |
+| Test suite | `tests/` | Safe to commit when it contains synthetic fixtures only |
 
-- **Face Recognition:** Matches detected faces with registered students.
-- **QR Verification:** Provides a controlled fallback; a QR code alone does not prove identity.
-- **Liveness Detection:** Helps detect spoofing attempts.
-- **Attendance Management:** Stores student details, timestamps and attendance records in SQLite.
-- **Dashboard and Reports:** Uses Flask for the interface and supports CSV and Excel exports.
+Never commit real student data, biometric images or templates, database exports, credentials, or model weights without checking applicable consent, policy and licensing requirements.
 
-## 4. Planned Technology Stack
+## Recognition and failure behavior
 
-- Python — main programming language
-- OpenCV — webcam access, image processing and face detection
-- Pretrained face-recognition model — identity matching
-- SQLite — local database
-- Flask — web dashboard
-- Pandas and OpenPyXL — reports and Excel exports
-- QR library — QR generation and verification
+- Images with zero or multiple faces are rejected.
+- Unknown or ambiguous candidates do not reach the attendance insert.
+- Invalid reference vectors are ignored; missing or incompatible references fail closed.
+- Duplicate and unregistered-student attendance outcomes are distinguished.
+- UI error messages avoid exposing exception details; diagnostic tracebacks are written to the local app log.
+- Similarity and margin thresholds in `recognition.py` are experimental and are not a measured accuracy guarantee.
 
-Additional libraries will be selected after checking Python compatibility and model licensing.
+## Current limits
 
-## 5. Privacy and Security
-
-- Use consenting participants for testing.
-- Keep face images, embeddings, student details, QR secrets and databases out of public Git repositories.
-- Do not record attendance when identity is uncertain.
-- Do not treat possession of a QR code as proof of identity.
-- Test false matches, missed detections and spoofing attempts.
-
-## 6. Current Progress
-
-- Project structure created.
-- Git initialized and working code committed.
-- Python virtual environment created.
-- OpenCV installed.
-- Webcam access tested successfully.
-- Haar Cascade face detection tested successfully.
-
-## 7. Next Milestone
-
-Choose a compatible pretrained face-recognition model and build the student enrollment and recognition workflow.
+- This is a local development prototype, without authentication, role-based permissions, transport controls, an audit log or a data-retention workflow.
+- There is no robust liveness or presentation-attack detection. A photograph or screen replay may be accepted.
+- It uses one configured session label and does not model a timetable. Its attendance percentage is based on recorded date/session data, not all scheduled classes.
+- Face recognition can have demographic and environmental error differences. A teacher must review uncertain or disputed results and offer a manual alternative.
+- Secure the host account and disk, restrict access to biometric data, and obtain informed consent before enrollment.

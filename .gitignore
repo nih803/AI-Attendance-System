@@ -19,6 +19,8 @@ data/test_cases/*
 
 # Secrets and local configuration
 .env
+.env.*
+!.env.example
 # Downloaded AI model files
 models/*.onnx
 # Local backup scripts
@@ -27,6 +29,9 @@ recognize_student_backup.py
 .pytest_cache/
 .coverage
 htmlcov/
+*.db-journal
+*.db-shm
+*.db-wal
 
 # IDE settings
 .vscode/

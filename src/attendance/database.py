@@ -1,55 +1,61 @@
+"""SQLite helpers for AttendAI student and attendance records."""
 
-import sqlite3
+from datetime import date
+from contextlib import contextmanager
 from pathlib import Path
+import sqlite3
 
-# Store the database in the project root
+
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DB_PATH = PROJECT_ROOT / "attendance.db"
 
 
+@contextmanager
 def get_connection():
-    """Open a connection to the SQLite database."""
-    connection = sqlite3.connect(DB_PATH)
-    connection.execute("PRAGMA foreign_keys = ON")
-    return connection
+    """Yield a connection with foreign keys enabled and always close it."""
+    connection = sqlite3.connect(DB_PATH, timeout=10)
+    try:
+        connection.execute("PRAGMA foreign_keys = ON")
+        with connection:
+            yield connection
+    finally:
+        connection.close()
 
 
 def create_tables():
-    """Create the student and attendance tables."""
+    """Create the student and attendance tables if they do not exist."""
     with get_connection() as connection:
-        connection.execute("""
+        connection.execute(
+            """
             CREATE TABLE IF NOT EXISTS students (
                 student_id TEXT PRIMARY KEY,
-                name TEXT NOT NULL
+                name TEXT NOT NULL CHECK (length(trim(name)) > 0)
             )
-        """)
-
-        connection.execute("""
+            """
+        )
+        connection.execute(
+            """
             CREATE TABLE IF NOT EXISTS attendance (
                 attendance_id INTEGER PRIMARY KEY AUTOINCREMENT,
                 student_id TEXT NOT NULL,
                 attendance_date TEXT NOT NULL,
-                session TEXT NOT NULL,
+                session TEXT NOT NULL CHECK (length(trim(session)) > 0),
                 recorded_at TEXT NOT NULL DEFAULT (
                     datetime('now', 'localtime')
                 ),
-                FOREIGN KEY (student_id)
-                    REFERENCES students(student_id),
+                FOREIGN KEY (student_id) REFERENCES students(student_id),
                 UNIQUE (student_id, attendance_date, session)
             )
-        """)
-
-    print("Database tables created successfully!")
-
-
+            """
+        )
 
 
 def add_student(student_id, name):
-    """Register a student and return the result."""
+    """Register a student; return ``success``, ``duplicate`` or ``invalid``."""
+    if not isinstance(student_id, str) or not isinstance(name, str):
+        return "invalid"
 
-    student_id = student_id.strip()
-    name = name.strip()
-
+    student_id, name = student_id.strip(), name.strip()
     if not student_id or not name:
         return "invalid"
 
@@ -57,83 +63,56 @@ def add_student(student_id, name):
         with get_connection() as connection:
             connection.execute(
                 "INSERT INTO students (student_id, name) VALUES (?, ?)",
-                (student_id, name)
+                (student_id, name),
             )
-
-        print(f"Student {name} registered successfully!")
         return "success"
-
     except sqlite3.IntegrityError:
-        print(f"Student ID {student_id} already exists.")
         return "duplicate"
 
 
 def list_students():
-    """Display all registered students."""
+    """Return students ordered by ID."""
     with get_connection() as connection:
-        students = connection.execute(
+        return connection.execute(
             "SELECT student_id, name FROM students ORDER BY student_id"
         ).fetchall()
 
-    if not students:
-        print("No students registered yet.")
-        return
 
-    print("\nRegistered Students:")
-    for student_id, name in students:
-        print(f"ID: {student_id} | Name: {name}")
+def mark_attendance(student_id, session, attendance_date=None):
+    """Record attendance; return ``success``, ``duplicate`` or ``invalid``."""
+    if not isinstance(student_id, str) or not student_id.strip():
+        return "invalid"
+    if not isinstance(session, str) or not session.strip():
+        return "invalid"
 
-
-from datetime import date
-
-
-
-def mark_attendance(student_id, session):
-    """Record attendance and return the result."""
-
-    attendance_date = date.today().isoformat()
-
+    attendance_date = attendance_date or date.today().isoformat()
     try:
         with get_connection() as connection:
             connection.execute(
                 """
-                INSERT INTO attendance
-                    (student_id, attendance_date, session)
+                INSERT INTO attendance (student_id, attendance_date, session)
                 VALUES (?, ?, ?)
                 """,
-                (student_id, attendance_date, session)
+                (student_id.strip(), attendance_date, session.strip()),
             )
-
-        print(f"Attendance marked for {student_id}.")
         return "success"
-
-    except sqlite3.IntegrityError:
-        print(f"Attendance already recorded or student does not exist.")
-        return "duplicate_or_invalid"
-
+    except sqlite3.IntegrityError as error:
+        # A foreign-key failure means the recognized ID is not registered.
+        if "FOREIGN KEY" in str(error).upper():
+            return "invalid"
+        return "duplicate"
 
 
 def list_attendance():
-    """Display all attendance records."""
+    """Return attendance rows ordered by date and student."""
     with get_connection() as connection:
-        records = connection.execute(
+        return connection.execute(
             """
             SELECT student_id, attendance_date, session, recorded_at
             FROM attendance
             ORDER BY attendance_date, student_id
             """
         ).fetchall()
-
-    print("\nAttendance Records:")
-    if not records:
-        print("No attendance records yet.")
-        return
-
-    for student_id, attendance_date, session, recorded_at in records:
-        print(
-            f"ID: {student_id} | Date: {attendance_date} | "
-            f"Session: {session} | Recorded at: {recorded_at}"
-        )
 
 
 if __name__ == "__main__":
