@@ -93,9 +93,6 @@ camera = cv2.VideoCapture(0)
 if not camera.isOpened():
     raise SystemExit("Could not open webcam.")
 
-# Remember successful attendance attempts during this run.
-attendance_marked = set()
-
 try:
     while True:
         success, frame = camera.read()

@@ -20,8 +20,9 @@ student_id = input("Enter test student ID (example ST001): ").strip()
 if not student_id or not all(
     c.isalnum() or c in "_-" for c in student_id
 ):
-    raise ValueError("Use letters, numbers, underscores or hyphens only.")
-
+    raise ValueError(
+    "Use letters, numbers, underscores or hyphens only."
+)
 save_folder = Path("data") / "enrollment" / student_id
 save_folder.mkdir(parents=True, exist_ok=True)
 

@@ -58,7 +58,9 @@ if captured_frame is not None:
 
     uploaded_image = UploadedImage()
 
-    student_id = "ST003"
+    student_id = input("Enter a NEW test student ID: ").strip()
+    if not student_id:
+        raise ValueError("Student ID cannot be empty.")
 
     success, message = save_face_image(
         student_id,

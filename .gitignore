@@ -21,3 +21,5 @@ data/test_cases/*
 .env
 # Downloaded AI model files
 models/*.onnx
+# Local backup scripts
+recognize_student_backup.py
