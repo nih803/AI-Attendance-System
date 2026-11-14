@@ -6,7 +6,8 @@ import numpy as np
 from src.attendance.database import mark_attendance
 
 # Project paths
-PROJECT_ROOT = Path(__file__).resolve().parent
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+
 ENROLLMENT_DIR = PROJECT_ROOT / "data" / "enrollment"
 MODEL_DIR = PROJECT_ROOT / "models"
 
@@ -93,6 +94,9 @@ camera = cv2.VideoCapture(0)
 if not camera.isOpened():
     raise SystemExit("Could not open webcam.")
 
+# Remember students already processed during this camera session.
+attendance_processed = set()
+
 try:
     while True:
         success, frame = camera.read()
@@ -145,9 +149,9 @@ try:
                         label = f"{best_id} | Similarity: {best_score:.2f}"
                         color = (0, 255, 0)
 
-                        if best_id not in attendance_marked:
+                        if best_id not in attendance_processed:
                             mark_attendance(best_id, SESSION)
-                            attendance_marked.add(best_id)
+                            attendance_processed.add(best_id)
                     elif best_score >= THRESHOLD:
                         label = "Ambiguous match - not marked"
                         color = (0, 165, 255)

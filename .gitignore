@@ -23,3 +23,15 @@ data/test_cases/*
 models/*.onnx
 # Local backup scripts
 recognize_student_backup.py
+# Test and coverage files
+.pytest_cache/
+.coverage
+htmlcov/
+
+# IDE settings
+.vscode/
+
+# Operating system files
+.DS_Store
+Thumbs.db
+desktop.ini
