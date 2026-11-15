@@ -5,6 +5,7 @@ from pathlib import Path
 
 import cv2
 import numpy as np
+from src.attendance.database import _require_local_write_access
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -24,6 +25,7 @@ def validate_student_id(student_id):
 
 def save_face_image(student_id, uploaded_image, detector, recognizer):
     """Validate and store one aligned face image in the local data folder."""
+    _require_local_write_access()
     if not validate_student_id(student_id):
         return False, "Invalid student ID."
     if uploaded_image is None or not hasattr(uploaded_image, "getvalue"):

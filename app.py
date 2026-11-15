@@ -1,6 +1,8 @@
 import streamlit as st
 import sqlite3
 import logging
+import tempfile
+from contextlib import closing
 from pathlib import Path
 from datetime import date, datetime
 import cv2
@@ -9,11 +11,14 @@ import numpy as np
 from src.attendance.recognition import (
     load_models,
     load_student_references,
+    get_reference_load_diagnostics,
     recognize_face,
     process_recognition_result
 )
 
 from src.attendance.database import add_student
+from src.attendance import database as attendance_database
+from src.attendance.public_demo import create_sample_database
 from src.attendance.enrollment import save_face_image
 
 logger = logging.getLogger(__name__)
@@ -33,18 +38,28 @@ st.set_page_config(
 # ==========================================
 PROJECT_ROOT = Path(__file__).resolve().parent
 DB_PATH = PROJECT_ROOT / "attendance.db"
+PUBLIC_DEMO = attendance_database.public_demo_enabled()
+if PUBLIC_DEMO:
+    # Streamlit session state is private to each browser session; each session
+    # receives its own disposable database and never touches attendance.db.
+    if "public_demo_db_dir" not in st.session_state:
+        st.session_state.public_demo_db_dir = tempfile.mkdtemp(prefix="attendai-demo-")
+    DB_PATH = Path(st.session_state.public_demo_db_dir) / "demo.db"
+    create_sample_database(DB_PATH)
+    attendance_database.DB_PATH = DB_PATH
 # ==========================================
 # LOAD FACE RECOGNITION MODELS
 # ==========================================
 
 @st.cache_resource
-def initialize_recognition():
+def initialize_recognition(registered_student_ids):
 
     detector, recognizer = load_models()
 
     student_references = load_student_references(
         detector,
-        recognizer
+        recognizer,
+        registered_student_ids,
     )
 
     return detector, recognizer, student_references
@@ -64,7 +79,7 @@ def get_dashboard_data():
         }
 
     try:
-        with sqlite3.connect(DB_PATH, timeout=10) as connection:
+        with closing(sqlite3.connect(DB_PATH, timeout=10)) as connection:
             total_students = connection.execute(
                 "SELECT COUNT(*) FROM students"
             ).fetchone()[0]
@@ -331,8 +346,15 @@ with st.sidebar:
 
     st.markdown("---")
     st.caption("AI-Powered Smart Attendance")
-    st.caption("Local prototype • Development mode")
+    st.caption("Fictional demonstration data" if PUBLIC_DEMO else "Local prototype • Development mode")
 
+
+if PUBLIC_DEMO:
+    st.warning(
+        "**Read-only public demonstration.** All student names, IDs, and "
+        "attendance records shown here are fictional. Changes are disabled, "
+        "and face images are not accepted or stored."
+    )
 
 # Keep the selected student available across Streamlit reruns.
 if "enrollment_student_id" not in st.session_state:
@@ -438,7 +460,8 @@ if page == "Dashboard":
                     "Student Name": row[1],
                     "Date": row[2],
                     "Session": row[3],
-                    "Recorded At": row[4]
+                    "Recorded At": row[4],
+                    **({"Data": "Fictional demo"} if PUBLIC_DEMO else {}),
                 }
                 for row in recent_records
             ]
@@ -484,6 +507,23 @@ if page == "Dashboard":
 # STUDENTS PAGE
 # ==========================================
 elif page == "Students":
+
+    if PUBLIC_DEMO:
+        st.title("Students")
+        st.caption("Fictional demonstration roster · read-only")
+        with closing(sqlite3.connect(DB_PATH)) as connection:
+            students = connection.execute(
+                "SELECT student_id, name FROM students ORDER BY student_id"
+            ).fetchall()
+        st.dataframe(
+            [{"Student ID": row[0], "Student Name": row[1], "Data": "Fictional demo"}
+             for row in students],
+            use_container_width=True,
+            hide_index=True,
+        )
+        st.metric("Fictional students", len(students))
+        st.info("Registration and face enrollment are disabled. Local mode retains the full enrollment workflow.")
+        st.stop()
 
     st.title("👥 Student Management")
     st.caption("Register students and enroll their face images.")
@@ -533,7 +573,7 @@ elif page == "Students":
     st.subheader("Face Enrollment")
 
     if DB_PATH.exists():
-        with sqlite3.connect(DB_PATH) as connection:
+        with closing(sqlite3.connect(DB_PATH)) as connection:
             students = connection.execute(
                 """
                 SELECT student_id, name
@@ -612,7 +652,9 @@ elif page == "Students":
                 type="primary"
             ):
                 try:
-                    detector, recognizer, _ = initialize_recognition()
+                    detector, recognizer, _ = initialize_recognition(
+                        tuple(student_id for student_id, _ in students)
+                    )
                     success, message = save_face_image(
                         selected_student_id,
                         captured_face,
@@ -664,6 +706,18 @@ elif page == "Students":
 # ==========================================
 elif page == "Take Attendance":
 
+    if PUBLIC_DEMO:
+        st.title("Face recognition")
+        st.info(
+            "Live recognition and attendance recording are disabled in this "
+            "read-only demonstration. In local mode, AttendAI uses OpenCV "
+            "YuNet to detect a face and SFace to compare its feature vector "
+            "with locally enrolled references. The result is recorded only "
+            "when the match passes the configured thresholds. No recognition "
+            "is simulated here, and no camera input is accepted."
+        )
+        st.stop()
+
     st.title("📸 Take Attendance")
 
     st.write(
@@ -680,7 +734,22 @@ elif page == "Take Attendance":
     )
 
     try:
-        detector, recognizer, student_references = initialize_recognition()
+        registered_student_ids = tuple(
+            student_id for student_id, _ in attendance_database.list_students()
+        )
+        detector, recognizer, student_references = initialize_recognition(
+            registered_student_ids
+        )
+        reference_diagnostics = get_reference_load_diagnostics()
+        st.caption(
+            "Reference check: "
+            f"{reference_diagnostics['loaded_references']} loaded, "
+            f"{reference_diagnostics['skipped_images']} image(s) skipped, "
+            f"{reference_diagnostics['invalid_features']} invalid feature(s), "
+            f"{reference_diagnostics['ignored_folders']} stale folder(s) ignored, "
+            f"{reference_diagnostics['students_without_references']} "
+            "registered student(s) without a usable reference."
+        )
 
         if not student_references:
             st.warning(
@@ -764,11 +833,11 @@ elif page == "Take Attendance":
 elif page == "Attendance History":
 
     st.title("📋 Attendance History")
-    st.caption("Search, filter and browse attendance records.")
+    st.caption("Search, filter and browse attendance records." + (" All records are fictional demonstration data." if PUBLIC_DEMO else ""))
 
     if DB_PATH.exists():
 
-        with sqlite3.connect(DB_PATH) as connection:
+        with closing(sqlite3.connect(DB_PATH)) as connection:
             records = connection.execute(
                 """
                 SELECT
@@ -794,7 +863,8 @@ elif page == "Attendance History":
                     "Student Name": row[1],
                     "Date": row[2],
                     "Session": row[3],
-                    "Recorded At": row[4]
+                    "Recorded At": row[4],
+                    **({"Data": "Fictional demo"} if PUBLIC_DEMO else {}),
                 }
                 for row in records
             ]
@@ -901,7 +971,7 @@ elif page == "Reports":
     import pandas as pd
 
     st.title("📊 Attendance Reports")
-    st.caption("Analyze daily, monthly and student-wise attendance.")
+    st.caption("Analyze daily, monthly and student-wise attendance." + (" All records are fictional demonstration data." if PUBLIC_DEMO else ""))
 
     if DB_PATH.exists():
 
@@ -925,7 +995,7 @@ elif page == "Reports":
             st.error("Start date cannot be after end date.")
             st.stop()
 
-        with sqlite3.connect(DB_PATH) as connection:
+        with closing(sqlite3.connect(DB_PATH)) as connection:
 
             records = connection.execute(
                 """
@@ -962,6 +1032,8 @@ elif page == "Reports":
                     "Recorded At"
                 ]
             )
+            if PUBLIC_DEMO:
+                df["Data"] = "Fictional demo"
 
             df["Date"] = pd.to_datetime(df["Date"])
 
@@ -1001,6 +1073,8 @@ elif page == "Reports":
                 width="stretch",
                 hide_index=True
             )
+            if PUBLIC_DEMO:
+                st.bar_chart(daily_summary.set_index("Date")["Present"])
 
             # --------------------------------
             # MONTHLY SUMMARY
@@ -1072,6 +1146,8 @@ elif page == "Reports":
             ).round(2)
 
             student_summary["Total Recorded Sessions"] = total_sessions
+            if PUBLIC_DEMO:
+                student_summary["Data"] = "Fictional demo"
 
             st.dataframe(
                 student_summary,

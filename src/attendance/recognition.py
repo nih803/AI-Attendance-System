@@ -1,11 +1,12 @@
 """Face matching helpers used by the AttendAI dashboard."""
 
 from pathlib import Path
+import logging
 
 import cv2
 import numpy as np
 
-from src.attendance.database import mark_attendance
+from src.attendance.database import list_students, mark_attendance
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -17,6 +18,21 @@ MODEL_DIR = PROJECT_ROOT / "models"
 THRESHOLD = 0.40
 MARGIN_THRESHOLD = 0.05
 SESSION = "Morning"
+logger = logging.getLogger(__name__)
+
+_REFERENCE_LOAD_DIAGNOSTICS = {
+    "loaded_references": 0,
+    "loaded_images": 0,
+    "skipped_images": 0,
+    "invalid_features": 0,
+    "ignored_folders": 0,
+    "students_without_references": 0,
+}
+
+
+def get_reference_load_diagnostics():
+    """Return aggregate reference-loading counts without identifying records."""
+    return dict(_REFERENCE_LOAD_DIAGNOSTICS)
 
 
 def load_models():
@@ -40,41 +56,108 @@ def load_models():
     return detector, recognizer
 
 
-def load_student_references(detector, recognizer):
-    """Build one normalized reference vector from each usable student's photos."""
+def load_student_references(detector, recognizer, registered_student_ids=None):
+    """Build validated normalized references for currently registered students.
+
+    Diagnostics contain counts only; no IDs, paths, images, or features are logged.
+    """
     references = {}
-    if not ENROLLMENT_DIR.is_dir():
-        return references
+    if registered_student_ids is None:
+        registered_student_ids = (student_id for student_id, _ in list_students())
+    registered_ids = {
+        student_id for student_id in registered_student_ids
+        if isinstance(student_id, str) and student_id
+    }
+    diagnostics = {
+        "loaded_references": 0,
+        "loaded_images": 0,
+        "skipped_images": 0,
+        "invalid_features": 0,
+        "ignored_folders": 0,
+        "students_without_references": 0,
+    }
 
-    for folder in sorted(ENROLLMENT_DIR.iterdir()):
-        if not folder.is_dir():
-            continue
-        feature_vectors = []
-        for image_path in sorted(folder.glob("*.jpg")):
-            image = cv2.imread(str(image_path))
-            if image is None:
+    if ENROLLMENT_DIR.is_dir():
+        for folder in sorted(ENROLLMENT_DIR.iterdir()):
+            if not folder.is_dir():
                 continue
-            height, width = image.shape[:2]
-            try:
-                detector.setInputSize((width, height))
-                _, faces = detector.detect(image)
-                if faces is None or len(faces) != 1:
+            if folder.name not in registered_ids:
+                diagnostics["ignored_folders"] += 1
+                continue
+
+            feature_vectors = []
+            expected_shape = None
+            image_paths = sorted(folder.glob("*.jpg"))
+            for image_path in image_paths:
+                try:
+                    image = cv2.imread(str(image_path))
+                except cv2.error:
+                    image = None
+                if (
+                    image is None
+                    or not isinstance(image, np.ndarray)
+                    or image.size == 0
+                    or image.ndim != 3
+                    or image.shape[2] != 3
+                ):
+                    diagnostics["skipped_images"] += 1
                     continue
-                aligned_face = recognizer.alignCrop(image, faces[0])
-                feature = np.asarray(
-                    recognizer.feature(aligned_face), dtype=np.float32
-                ).reshape(-1)
-            except cv2.error:
-                continue
-            norm = np.linalg.norm(feature)
-            if norm > 0 and np.isfinite(norm) and np.all(np.isfinite(feature)):
-                feature_vectors.append(feature / norm)
 
-        if feature_vectors:
-            reference = np.mean(feature_vectors, axis=0)
-            norm = np.linalg.norm(reference)
-            if norm > 0 and np.isfinite(norm):
-                references[folder.name] = reference / norm
+                height, width = image.shape[:2]
+                if height <= 0 or width <= 0 or height * width > 20_000_000:
+                    diagnostics["skipped_images"] += 1
+                    continue
+                try:
+                    detector.setInputSize((width, height))
+                    _, faces = detector.detect(image)
+                    if faces is None or len(faces) != 1:
+                        diagnostics["skipped_images"] += 1
+                        continue
+                    aligned_face = recognizer.alignCrop(image, faces[0])
+                    feature = np.asarray(
+                        recognizer.feature(aligned_face), dtype=np.float32
+                    ).reshape(-1)
+                except (cv2.error, ValueError, TypeError):
+                    diagnostics["skipped_images"] += 1
+                    continue
+
+                norm = np.linalg.norm(feature)
+                if (
+                    feature.size == 0
+                    or not np.isfinite(norm)
+                    or norm <= 0
+                    or not np.all(np.isfinite(feature))
+                    or (expected_shape is not None and feature.shape != expected_shape)
+                ):
+                    diagnostics["invalid_features"] += 1
+                    continue
+
+                expected_shape = feature.shape
+                feature_vectors.append(feature / norm)
+                diagnostics["loaded_images"] += 1
+
+            if feature_vectors:
+                reference = np.mean(feature_vectors, axis=0)
+                norm = np.linalg.norm(reference)
+                if norm > 0 and np.isfinite(norm) and np.all(np.isfinite(reference)):
+                    references[folder.name] = reference / norm
+                else:
+                    diagnostics["invalid_features"] += len(feature_vectors)
+
+    diagnostics["loaded_references"] = len(references)
+    diagnostics["students_without_references"] = len(registered_ids - references.keys())
+    _REFERENCE_LOAD_DIAGNOSTICS.update(diagnostics)
+    logger.info(
+        "Enrollment reference load: %d references loaded from %d images; "
+        "%d images skipped; %d invalid features; %d stale folders ignored; "
+        "%d registered students without a usable reference.",
+        diagnostics["loaded_references"],
+        diagnostics["loaded_images"],
+        diagnostics["skipped_images"],
+        diagnostics["invalid_features"],
+        diagnostics["ignored_folders"],
+        diagnostics["students_without_references"],
+    )
     return references
 
 

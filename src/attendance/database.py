@@ -4,6 +4,23 @@ from datetime import date
 from contextlib import contextmanager
 from pathlib import Path
 import sqlite3
+import os
+
+
+def public_demo_enabled():
+    """Read the public-demo switch from environment or Streamlit secrets."""
+    if os.getenv("ATTENDAI_PUBLIC_DEMO", "").strip().lower() == "true":
+        return True
+    try:
+        import streamlit as st
+        return str(st.secrets.get("ATTENDAI_PUBLIC_DEMO", "")).strip().lower() == "true"
+    except Exception:
+        return False
+
+
+def _require_local_write_access():
+    if public_demo_enabled():
+        raise PermissionError("Write operations are disabled in public demo mode.")
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -24,6 +41,7 @@ def get_connection():
 
 def create_tables():
     """Create the student and attendance tables if they do not exist."""
+    _require_local_write_access()
     with get_connection() as connection:
         connection.execute(
             """
@@ -52,6 +70,7 @@ def create_tables():
 
 def add_student(student_id, name):
     """Register a student; return ``success``, ``duplicate`` or ``invalid``."""
+    _require_local_write_access()
     if not isinstance(student_id, str) or not isinstance(name, str):
         return "invalid"
 
@@ -80,6 +99,7 @@ def list_students():
 
 def mark_attendance(student_id, session, attendance_date=None):
     """Record attendance; return ``success``, ``duplicate`` or ``invalid``."""
+    _require_local_write_access()
     if not isinstance(student_id, str) or not student_id.strip():
         return "invalid"
     if not isinstance(session, str) or not session.strip():
