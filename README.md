@@ -298,7 +298,7 @@ Student face images and attendance records are sensitive information. The projec
 
 ## Public live demo
 
-**Live demo:** _Not deployed yet — URL will be added after a successful deployment._
+**Live demo:** [https://attendai-nih803.streamlit.app](https://attendai-nih803.streamlit.app)
 
 The hosted public version runs in read-only demo mode when `ATTENDAI_PUBLIC_DEMO=true` is set as an environment variable or Streamlit secret. It automatically creates a reproducible sample roster and attendance history in a temporary SQLite database allocated to that browser session. The sample data is regenerated as needed and is not stored in the repository or in `attendance.db`.
 
